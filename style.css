@@ -1,0 +1,653 @@
+/* ============ base ============ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --accent: #00e5ff;
+  --accent-dim: #0899a8;
+  --bg: #07090f;
+  --panel: rgba(12, 16, 26, 0.92);
+  --text: #cfe8f2;
+  --danger: #ff4d6d;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  display: block;
+}
+
+.hidden { display: none !important; }
+
+/* ============ overlays ============ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  background:
+    radial-gradient(ellipse at 50% 30%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+    rgba(4, 6, 11, 0.88);
+  /* no backdrop-filter: blurring the live canvas costs a full-screen GPU
+     pass every frame for a 12%-visible shimmer — not worth the battery */
+  z-index: 40;
+}
+
+header { text-align: center; }
+
+h1 {
+  font-size: 64px;
+  font-weight: 800;
+  letter-spacing: 10px;
+  color: #fff;
+}
+h1 span { color: var(--accent); }
+
+.tagline {
+  margin-top: 6px;
+  letter-spacing: 3px;
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+}
+
+/* ============ task cards ============ */
+/* 12 cards (6 original + spawntarget/motionshot/strafetrack/detection +
+   peek/freeroam): 5 + 5 + 2 columns-fill rows, so the menu still fits
+   1440×900 with room to spare */
+#task-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 240px);
+  gap: 14px;
+}
+@media (max-width: 1339px) { #task-grid { grid-template-columns: repeat(4, 240px); } }
+@media (max-width: 1079px) { #task-grid { grid-template-columns: repeat(3, 240px); } }
+@media (max-width: 819px)  { #task-grid { grid-template-columns: repeat(2, 240px); } }
+
+.task-card {
+  position: relative;
+  padding: 16px 16px 14px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.task-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.task-card .tag {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.task-card h3 {
+  /* 16px/ls1 + slim tag: main.js titles are single long words (SPAWNTARGET
+     ≈134px at this size) that fit the 150px left of the tag — bigger type
+     slides under the absolute .tag instead (no word-break available) */
+  font-size: 16px;
+  letter-spacing: 1px;
+  color: #fff;
+  margin-bottom: 6px;
+  padding-right: 74px;
+}
+.task-card p {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #8fb0c0;
+  min-height: 54px;
+  /* cap at 3 lines so a longer description can never grow the card and push
+     the 10-card menu past 900px (existing descs are already ≤ 3 lines) */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.task-card .best {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  color: var(--accent-dim);
+}
+.task-card .best b { color: var(--accent); font-size: 14px; }
+
+/* ============ settings ============ */
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 40px;
+  row-gap: 14px;
+  padding: 14px 26px;
+  /* fixed (clamped) width: with a 100%-basis row inside, `max-content`
+     sizes as-if-unwrapped (> viewport) and blows out edge-to-edge */
+  width: min(1100px, 100%);
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+.slider { display: flex; flex-direction: column; gap: 8px; width: 220px; }
+.slider span {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #7fa3b5;
+}
+.slider b { color: var(--accent); float: right; }
+.slider input { accent-color: var(--accent); cursor: pointer; }
+
+/* second row: crosshair / sound / graphics groups + stats button.
+   `flex-basis: 100%` pushes it onto its own line under the two original
+   sliders, so the existing markup stays untouched and nothing overflows */
+.settings-row {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 14px 24px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.set-group { display: flex; flex-direction: column; gap: 8px; }
+.group-label {
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.group-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 14px;
+}
+.sel { display: flex; align-items: center; gap: 8px; }
+.sel span {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: #7fa3b5;
+  text-transform: uppercase;
+}
+.sel select {
+  padding: 7px 8px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.sel select:hover { border-color: var(--accent); }
+.sel select option { background: #0c101a; color: var(--text); }
+.sel input[type="color"] {
+  width: 46px;
+  height: 30px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.slider.mini { width: 154px; gap: 6px; }
+.slider.mini span { font-size: 10px; letter-spacing: 1.5px; }
+.chk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: #7fa3b5;
+  cursor: pointer;
+  padding-bottom: 6px;
+}
+.chk input { accent-color: var(--accent); cursor: pointer; }
+.settings-row .btn {
+  padding: 10px 18px;
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+
+footer p {
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  color: #6b8899;
+}
+footer b { color: var(--text); }
+
+/* ============ HUD ============ */
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.hud-corner {
+  position: absolute;
+  top: 22px;
+  display: flex;
+  gap: 28px;
+}
+.hud-corner.left { left: 30px; }
+.hud-corner.right { right: 30px; }
+.hud-corner.center { left: 50%; transform: translateX(-50%); }
+
+.hud-stat { display: flex; flex-direction: column; }
+.hud-stat.right { text-align: right; }
+.hud-stat .label {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--accent-dim);
+}
+.hud-stat .value {
+  font-size: 34px;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+#hud-timer {
+  font-size: 46px;
+  font-weight: 800;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+#hud-timer.low { color: var(--danger); text-shadow: 0 0 18px rgba(255, 77, 109, 0.6); }
+
+#hud-task-name {
+  position: absolute;
+  bottom: 24px;
+  left: 30px;
+  font-size: 14px;
+  letter-spacing: 4px;
+  color: var(--accent-dim);
+}
+#hud-fps {
+  position: absolute;
+  bottom: 24px;
+  right: 30px;
+  font-size: 12px;
+  color: #4c6570;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============ crosshair ============ */
+/* main.js drives size/colour by setting --ch-size (a LENGTH, e.g. "18px")
+   and --ch-color (a colour, e.g. "#00e5ff") on #crosshair. Registration
+   makes a malformed value fall back to the default instead of wrecking the
+   absolute offsets below (var() fallback only fires for registered props). */
+@property --ch-size  { syntax: "<length>"; inherits: true; initial-value: 18px; }
+@property --ch-color { syntax: "<color>";  inherits: true; initial-value: #00e5ff; }
+
+#crosshair {
+  --ch-size: 18px;
+  --ch-color: var(--accent); /* follows the theme until main.js pins a saved one */
+  /* derived geometry (default look == the old hard-coded numbers) */
+  --ch-len:  calc(var(--ch-size, 18px) * 0.44);   /* line length   (7.9px @18) */
+  --ch-gap:  calc(var(--ch-size, 18px) / 3);       /* centre gap    (6px   @18) */
+  --ch-tick: calc(var(--ch-size, 18px) * 0.39);    /* tick box      (7px   @18) */
+  --ch-dot:  calc(var(--ch-size, 18px) * 0.22);    /* centre dot    (4px   @18) */
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  z-index: 25;
+  pointer-events: none;
+}
+.ch-dot {
+  position: absolute;
+  left: calc(var(--ch-dot) / -2);
+  top: calc(var(--ch-dot) / -2);
+  width: var(--ch-dot);
+  height: var(--ch-dot);
+  background: var(--ch-color);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--ch-color);
+}
+.ch-line {
+  position: absolute;
+  background: var(--ch-color);
+  box-shadow: 0 0 4px var(--ch-color);
+}
+.ch-line.n { left: -1px; top: calc(-1 * (var(--ch-gap) + var(--ch-len))); width: 2px; height: var(--ch-len); }
+.ch-line.s { left: -1px; top: var(--ch-gap);                              width: 2px; height: var(--ch-len); }
+.ch-line.w { top: -1px; left: calc(-1 * (var(--ch-gap) + var(--ch-len))); height: 2px; width: var(--ch-len); }
+.ch-line.e { top: -1px; left: var(--ch-gap);                              height: 2px; width: var(--ch-len); }
+.ch-tick {
+  position: absolute;
+  width: var(--ch-tick);
+  height: var(--ch-tick);
+  border-color: color-mix(in srgb, var(--ch-color) 55%, transparent);
+  border-style: solid;
+}
+.ch-tick.nw { left: calc(-1 * (var(--ch-gap) + var(--ch-tick))); top: calc(-1 * (var(--ch-gap) + var(--ch-tick))); border-width: 2px 0 0 2px; }
+.ch-tick.ne { left: var(--ch-gap); top: calc(-1 * (var(--ch-gap) + var(--ch-tick))); border-width: 2px 2px 0 0; }
+.ch-tick.sw { left: calc(-1 * (var(--ch-gap) + var(--ch-tick))); top: var(--ch-gap); border-width: 0 0 2px 2px; }
+.ch-tick.se { left: var(--ch-gap); top: var(--ch-gap); border-width: 0 2px 2px 0; }
+
+/* circle ring — hidden unless data-style="circle" */
+.ch-ring {
+  display: none;
+  position: absolute;
+  left: calc(var(--ch-size, 18px) * -0.8);
+  top: calc(var(--ch-size, 18px) * -0.8);
+  width: calc(var(--ch-size, 18px) * 1.6);
+  height: calc(var(--ch-size, 18px) * 1.6);
+  border: 1.5px solid var(--ch-color);
+  border-radius: 50%;
+  opacity: 0.9;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ch-color) 60%, transparent);
+}
+
+/* style modes driven by main.js via #crosshair[data-style] */
+#crosshair[data-style="dot"] .ch-line,
+#crosshair[data-style="dot"] .ch-tick,
+#crosshair[data-style="dot"] .ch-ring { display: none; }
+#crosshair[data-style="circle"] .ch-line,
+#crosshair[data-style="circle"] .ch-tick { display: none; }
+#crosshair[data-style="circle"] .ch-ring { display: block; }
+
+/* hit marker (shows briefly on a hit) */
+#hitmarker {
+  position: absolute;
+  left: -16px; top: -16px;
+  width: 32px; height: 32px;
+  opacity: 0;
+  transform: rotate(45deg) scale(1.4);
+}
+#hitmarker::before, #hitmarker::after {
+  content: "";
+  position: absolute;
+  background: #fff;
+}
+#hitmarker::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+#hitmarker::after  { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
+#hitmarker.show { animation: hm 0.22s ease-out; }
+@keyframes hm {
+  0%   { opacity: 1; transform: rotate(45deg) scale(0.7); }
+  100% { opacity: 0; transform: rotate(45deg) scale(1.5); }
+}
+#hitmarker.kill::before, #hitmarker.kill::after { background: var(--danger); }
+
+/* ============ countdown ============ */
+#countdown {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 160px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 0 40px color-mix(in srgb, var(--accent) 70%, transparent);
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* ============ floating score pops ============ */
+.score-pop {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 80%, transparent);
+  pointer-events: none;
+  z-index: 26;
+  animation: pop 0.6s ease-out forwards;
+}
+.score-pop.kill { color: var(--danger); text-shadow: 0 0 8px rgba(255, 77, 109, 0.8); font-size: 26px; }
+@keyframes pop {
+  0%   { opacity: 1; margin-top: 0; }
+  100% { opacity: 0; margin-top: -46px; }
+}
+
+/* ============ panels / buttons ============ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 36px 46px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 10px;
+  min-width: 320px;
+  text-align: center;
+}
+.panel.wide { min-width: 560px; }
+
+.panel h2 {
+  font-size: 30px;
+  letter-spacing: 6px;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.btn {
+  padding: 13px 20px;
+  font-size: 14px;
+  letter-spacing: 3px;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.btn:hover { background: rgba(255, 255, 255, 0.12); border-color: #fff; }
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  /* the original #04222a is cyan at 15% over black — derive it from the
+     accent so a dark-on-bright button text always matches its fill */
+  color: color-mix(in srgb, var(--accent) 15%, #000);
+}
+.btn.primary:hover { box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 50%, transparent); }
+
+/* ============ results ============ */
+.res-grid {
+  display: grid;
+  /* 8 cells → two tidy rows of four */
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 6px 0 10px;
+}
+.res-cell {
+  padding: 14px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.res-cell .label { font-size: 10px; letter-spacing: 2px; color: var(--accent-dim); }
+.res-cell .big {
+  font-size: 30px;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+/* grade letter — main.js sets e.g. res-grade.className = "big grade g-S" */
+.res-cell .grade { text-shadow: 0 0 14px currentColor; }
+.res-cell .grade.g-S { color: #ffd700; }
+.res-cell .grade.g-A { color: var(--accent); }
+.res-cell .grade.g-B { color: #8dff5c; }
+.res-cell .grade.g-C { color: #ffe14d; }
+.res-cell .grade.g-D { color: #ff6b81; }
+.new-best {
+  font-size: 14px;
+  letter-spacing: 3px;
+  font-weight: 700;
+  color: #ffd166;
+  text-shadow: 0 0 14px rgba(255, 209, 102, 0.7);
+  animation: blink 0.7s ease-in-out infinite alternate;
+}
+@keyframes blink { from { opacity: 0.55; } to { opacity: 1; } }
+
+/* pb-chase hint line under NEW PERSONAL BEST — main.js fills it; hidden when empty */
+.pb-chase {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+  min-height: 14px;
+}
+.pb-chase:empty { display: none; }
+
+.res-buttons { display: flex; gap: 12px; }
+.res-buttons .btn { flex: 1; }
+
+/* ============ stats overlay ============ */
+#stats .panel {
+  min-width: 640px;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+/* keep BACK reachable while the panel scrolls tall content */
+#stats .res-buttons {
+  position: sticky;
+  bottom: 0;
+  padding-top: 6px;
+  background: var(--panel);
+}
+#stats .panel::-webkit-scrollbar { width: 8px; }
+#stats .panel::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.04); border-radius: 4px; }
+#stats .panel::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 4px; }
+
+.stats-head {
+  font-size: 11px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+  min-height: 14px;
+}
+.stats-head:empty { display: none; }
+
+#stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+  text-align: left;
+  margin: 4px 0 8px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 8px;
+}
+.stat-card h3 {
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #fff;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.12);
+}
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #7fa3b5;
+}
+.stat-row span:first-child {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+}
+.stat-row .s-best,
+.stat-row .s-avg,
+.stat-row .s-runs {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.s-best { color: var(--accent); }
+.s-avg   { color: var(--text); }
+.s-runs  { color: #8fb0c0; }
+
+/* trend — main.js adds .up / .down / .flat; the arrow glyph comes from CSS */
+.s-trend { font-weight: 700; font-variant-numeric: tabular-nums; }
+.s-trend.up   { color: #5dff8f; }
+.s-trend.down { color: #ff6b81; }
+.s-trend.flat { color: #8a97a3; }
+.s-trend.up::before   { content: "▲ "; }
+.s-trend.down::before { content: "▼ "; }
+.s-trend.flat::before { content: "■ "; }
+
+svg.s-spark {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: 2px;
+}
+svg.s-spark polyline.spark-line {
+  fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.s-board {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 2px;
+}
+.board-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 7px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #6f8b9b;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+}
+.board-row b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

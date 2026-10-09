@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AIM RANGE — aim trainer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a1424'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%2300e5ff' stroke-width='2.5'/%3E%3Cpath d='M16 2v7M16 23v7M2 16h7M23 16h7' stroke='%2300e5ff' stroke-width='2.5'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ===== 3D canvas ===== -->
+<canvas id="scene"></canvas>
+
+<!-- ===== In-game HUD (visible while playing) ===== -->
+<div id="hud" class="hidden">
+  <div class="hud-corner left">
+    <div class="hud-stat"><span class="label">SCORE</span><span id="hud-score" class="value">0</span></div>
+    <div class="hud-stat"><span class="label">STREAK</span><span id="hud-streak" class="value">0</span></div>
+  </div>
+  <div class="hud-corner center">
+    <div id="hud-timer">60.0</div>
+  </div>
+  <div class="hud-corner right">
+    <div class="hud-stat right"><span class="label">ACCURACY</span><span id="hud-acc" class="value">—</span></div>
+    <div class="hud-stat right"><span class="label">TARGETS</span><span id="hud-kills" class="value">0</span></div>
+  </div>
+  <div id="hud-task-name"></div>
+  <div id="hud-fps"></div>
+</div>
+
+<!-- ===== Crosshair ===== -->
+<div id="crosshair" class="hidden">
+  <span class="ch-dot"></span>
+  <span class="ch-line n"></span><span class="ch-line s"></span>
+  <span class="ch-line e"></span><span class="ch-line w"></span>
+  <span class="ch-tick nw"></span><span class="ch-tick ne"></span>
+  <span class="ch-tick sw"></span><span class="ch-tick se"></span>
+  <span class="ch-ring"></span>
+  <div id="hitmarker"></div>
+</div>
+
+<!-- ===== Countdown ===== -->
+<div id="countdown" class="hidden"></div>
+
+<!-- ===== Main menu ===== -->
+<div id="menu" class="overlay">
+  <header>
+    <h1>AIM<span>RANGE</span></h1>
+    <p class="tagline">browser aim trainer &mdash; built with three.js</p>
+  </header>
+
+  <div id="task-grid"><!-- task cards injected by JS --></div>
+
+  <div class="settings">
+    <label class="slider">
+      <span>SENSITIVITY <b id="sens-val">1.00</b></span>
+      <input type="range" id="sens" min="0.1" max="3" step="0.05" value="1" />
+    </label>
+    <label class="slider">
+      <span>FOV <b id="fov-val">90</b></span>
+      <input type="range" id="fov" min="70" max="110" step="1" value="90" />
+    </label>
+
+    <div class="settings-row">
+      <div class="set-group">
+        <span class="group-label">CROSSHAIR</span>
+        <div class="group-controls">
+          <label class="sel"><span>CROSSHAIR</span>
+            <select id="ch-style">
+              <option value="cross">Cross</option>
+              <option value="dot">Dot</option>
+              <option value="circle">Circle</option>
+            </select>
+          </label>
+          <label class="slider mini">
+            <span>SIZE <b id="ch-size-val">18</b></span>
+            <input type="range" id="ch-size" min="6" max="36" step="1" value="18" />
+          </label>
+          <label class="sel"><span>COLOR</span><input type="color" id="ch-color" value="#00e5ff" /></label>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <span class="group-label">SOUND</span>
+        <div class="group-controls">
+          <label class="slider mini">
+            <span>VOLUME <b id="sfx-vol-val">70</b></span>
+            <input type="range" id="sfx-vol" min="0" max="100" step="5" value="70" />
+          </label>
+          <label class="chk"><input type="checkbox" id="sfx-mute" /> MUTE</label>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <span class="group-label">GRAPHICS</span>
+        <div class="group-controls">
+          <label class="slider mini">
+            <span>RESOLUTION <b id="res-scale-val">100%</b></span>
+            <input type="range" id="res-scale" min="60" max="100" step="5" value="100" />
+          </label>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <span class="group-label">STYLE</span>
+        <div class="group-controls">
+          <label class="sel"><span>THEME</span>
+            <select id="theme-style">
+              <option value="neon">Neon</option>
+              <option value="synth">Synthwave</option>
+              <option value="ember">Ember</option>
+              <option value="matrix">Matrix</option>
+            </select>
+          </label>
+          <label class="sel"><span>BALL</span>
+            <select id="ball-style">
+              <option value="orb">Glossy Orb</option>
+              <option value="plasma">Plasma</option>
+              <option value="holo">Hologram</option>
+              <option value="candy">Candy</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <span class="group-label">FEEL</span>
+        <div class="group-controls">
+          <label class="slider mini">
+            <span>INERTIA <b id="inertia-val">100%</b></span>
+            <input type="range" id="inertia" min="0" max="200" step="10" value="100" />
+          </label>
+          <label class="slider mini">
+            <span>CAM RECOIL <b id="cam-recoil-val">100%</b></span>
+            <input type="range" id="cam-recoil" min="0" max="300" step="10" value="100" />
+          </label>
+          <label class="slider mini">
+            <span>GUN KICK <b id="gun-kick-val">100%</b></span>
+            <input type="range" id="gun-kick" min="0" max="200" step="10" value="100" />
+          </label>
+        </div>
+      </div>
+
+      <button id="btn-stats" class="btn">STATS</button>
+    </div>
+  </div>
+
+  <footer>
+    <p><b>CLICK</b> a task to start &nbsp;·&nbsp; <b>MOVE MOUSE</b> to aim &nbsp;·&nbsp; <b>LMB</b> shoot &nbsp;·&nbsp; <b>ESC</b> pause</p>
+  </footer>
+</div>
+
+<!-- ===== Pause overlay ===== -->
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2>PAUSED</h2>
+    <button id="btn-resume" class="btn primary">RESUME</button>
+    <button id="btn-restart" class="btn">RESTART</button>
+    <button id="btn-quit" class="btn">MAIN MENU</button>
+  </div>
+</div>
+
+<!-- ===== Results overlay ===== -->
+<div id="results" class="overlay hidden">
+  <div class="panel wide">
+    <h2 id="res-title">RESULTS</h2>
+    <div id="res-newbest" class="new-best hidden">NEW PERSONAL BEST!</div>
+    <div id="res-pbchase" class="pb-chase"></div>
+    <div class="res-grid">
+      <div class="res-cell"><span class="label">SCORE</span><span id="res-score" class="big">0</span></div>
+      <div class="res-cell"><span class="label">ACCURACY</span><span id="res-acc" class="big">0%</span></div>
+      <div class="res-cell"><span class="label">TARGETS</span><span id="res-kills" class="big">0</span></div>
+      <div class="res-cell"><span class="label">BEST STREAK</span><span id="res-streak" class="big">0</span></div>
+      <div class="res-cell"><span class="label">TARGETS / SEC</span><span id="res-kpm" class="big">0</span></div>
+      <div class="res-cell"><span class="label">AVG REACTION</span><span id="res-react" class="big">—</span></div>
+      <div class="res-cell"><span class="label">GRADE</span><span id="res-grade" class="big grade">—</span></div>
+      <div class="res-cell"><span class="label">PERSONAL BEST</span><span id="res-best" class="big">0</span></div>
+    </div>
+    <div class="res-buttons">
+      <button id="btn-again" class="btn primary">RUN IT BACK</button>
+      <button id="btn-menu" class="btn">MAIN MENU</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Statistics overlay ===== -->
+<div id="stats" class="overlay hidden">
+  <div class="panel wide">
+    <h2>STATISTICS</h2>
+    <div id="stats-grid"></div>
+    <div class="res-buttons"><button id="btn-stats-close" class="btn primary">BACK</button></div>
+  </div>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
