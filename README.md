@@ -133,12 +133,16 @@ screen-space hitmarker, a floating `+score` pop, and a pooled additive burst
 (white flash + 9 gravity sparks) at the impact point. On top of that, every
 shot leaves physical evidence:
 
-- **Bullet trail** — a short additive streak, crosshair → impact, ~110 ms. It
-  IS the projectile (the shot is hitscan), pooled 8 deep, one stretched box
-  each. The start point sits **on the aim ray** (0.8 m in front of the eye),
-  not at the muzzle: every point on that ray projects to the same screen
-  pixel, so the streak always reads as one straight line leaving the
-  crosshair instead of a diagonal "bent bullet" from the offset gun.
+- **Bullet trail** — a short additive streak, gun-side → impact, ~130 ms. It
+  IS the projectile (the shot is hitscan), pooled 8 deep. The start point sits
+  **on the aim ray** 1.0 m in front of the eye — so the far end converges on
+  whatever you aimed at — but dragged `TRAIL_PULL` (0.85) of the way toward
+  the muzzle, so the near end lands ~200 px below-right of the crosshair.
+  Neither extreme works: exactly on the ray every point projects to the same
+  pixel (an invisible dot — that is what a "broken" trail looks like), while
+  the muzzle proper cuts a long diagonal from the corner of the screen (the
+  "bent bullet" look). 1.0 m is also past the viewmodel's nose, which is what
+  hid the previous version behind the gun's own geometry.
 - **Bullet holes** — one `InstancedMesh`, 48 slots, oldest-first recycling.
   Walls and floor keep the dent (dark pit + light chip rim so it reads on
   dark surfaces); orbs absorb the shot and never get one. A dent is permanent
@@ -163,11 +167,20 @@ shot leaves physical evidence:
 - **Merged geometry** — the three walls bake their texture repeat into UVs and
   draw as ONE mesh/material (`mergeGroup`, `main.js:661`): 3 draw calls → 1,
   3 texture-clone sets → 1, visually pixel-identical.
+- **One draw call per effect** — the 8 pooled trails share a single
+  `InstancedMesh`, and every live hit-burst particle (flash + sparks) is one
+  camera-billboarded instanced quad instead of a sprite. Per-instance
+  brightness rides `instanceColor` multiplied by a white vertex-colour
+  attribute (three only forwards `vColor` to the fragment shader when
+  `USE_COLOR` is defined — verified in the vendored r160 source). That removes
+  the biggest draw-call spike in the game: a hit burst used to be 10 sprite
+  draws.
 
-Measured (`node probes/perf.mjs`, 1440×900): **60.8 fps, 0.38 ms/render
-(p95 0.5), 34 draw calls, ~10.1k triangles** while shooting — and **0
-renders/s** once the scene settles (a spent casing animates for ~4–5 s first,
-which is why the probe waits 6 s before it measures idleness).
+Measured (`node probes/perf.mjs`, 1440×900): **62.8 fps, 1.26 ms/render
+(p95 1.6), 25 draw calls, ~10.1k triangles** while shooting — down from **34
+calls** before the effects were instanced — and **0 renders/s** once the
+scene settles (a spent casing animates for ~4–5 s first, which is why the
+probe waits 6 s before it measures idleness).
 
 ## Tests (headless Playwright — server must be up)
 

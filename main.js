@@ -1077,14 +1077,18 @@ function shootRay() {
    absorbs it (no hole), a wall/panel/floor keeps the dent. Reuses the ray
    shootRay() just aimed — no second camera setup. */
 function shotFX(hit) {
-  /* Anchor the streak ON the aim ray, not on the muzzle. The viewmodel sits
-     right-of-centre and low, so a muzzle→impact line cuts a diagonal across
-     the crosshair and reads as a bent bullet — the gun "points right" while
-     the hole appears straight ahead. Every point on the camera ray projects
-     to the same screen pixel, so starting a bit in front of the eye makes
-     the streak a straight line running out of the crosshair.0.8 m is past
-     the muzzle (the gun never enters the gameplay raycast, so no conflict). */
-  const from = raycaster.ray.at(TRAIL_START, new THREE.Vector3());
+  /* Tracer start = a point ON the aim ray (so the far end converges on what
+     you actually aimed at) pulled TRAIL_PULL of the way toward the muzzle.
+     Two failure modes this avoids: exactly on the ray, every point projects
+     to the same pixel → an invisible dot; at the muzzle proper, the streak
+     cuts a long diagonal from the corner of the screen. Between the two it
+     reads as coming out of the gun and landing where you aimed. */
+  const eye = raycaster.ray.origin, dir = raycaster.ray.direction;
+  const onRay = raycaster.ray.at(TRAIL_START, _tl0);
+  vm.muzzle.getWorldPosition(_tl1);                 // barrel tip, world space
+  _tl2.subVectors(_tl1, eye);                       // eye → muzzle
+  _tl2.addScaledVector(dir, -_tl2.dot(dir));        // keep only the off-axis part
+  const from = onRay.addScaledVector(_tl2, TRAIL_PULL);
   let end, holeHit = null;
   if (hit && hit !== "cover") {
     end = hit.point;
@@ -1227,108 +1231,159 @@ function showHitmarker(kill) {
 
 /* --- hit burst: flash + sparks at the impact point ---
    Audio alone (even a great one) doesn't sell a hit — the eye needs
-   confirmation at the SAME instant. Two parts, each with a job:
-   white flash = "contact NOW", sparks = direction + weight. Everything is
-   additive-blended so it reads as light on top of the orb color. Sprites are
-   POOLED (free list) so a streak of hits allocates nothing and frees nothing
-   — no GC pause mid-frame while you're aiming. Lives in `hitBursts`; while
-   any is alive we invalidate() every frame, so the effect renders but a
-   settled scene still costs 0 renders/s. */
-const spritePool = [];
-function takeSprite(scale) {
-  const s = spritePool.pop() || new THREE.Sprite(new THREE.SpriteMaterial({
-    map: haloTex, transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  }));
-  if (!s.parent) scene.add(s);
-  s.visible = true;
-  s.scale.setScalar(scale);
-  s.material.opacity = 1;
-  return s;
-}
-function restSprite(s) {
-  s.visible = false;
-  spritePool.push(s);
-}
+   confirmation at the SAME instant. Two parts, each with a job: white flash
+   = "contact NOW", sparks = direction + weight. Both are additive, so the
+   effect reads as light on top of the orb colour.
+
+   Everything is drawn by ONE InstancedMesh of camera-facing quads
+   (billboarded on the CPU from the camera's world quaternion): one draw call
+   and one material for every live particle, instead of one sprite = one draw
+   call each. That was the biggest draw-call spike in the game — measured 23
+   calls at rest → 34 the instant a hit burst spawned (1 flash + 9 sparks).
+   Sparks are plain data objects recycled through sparkPool, so a spray of
+   hits allocates nothing and never triggers GC mid-frame. While any burst is
+   alive we invalidate() every frame; a settled scene still costs 0 renders/s. */
+const BURST_N = 240; // particle capacity across every live burst
+const burstGeo = new THREE.PlaneGeometry(1, 1);
+burstGeo.setAttribute("color", new THREE.BufferAttribute(
+  new Float32Array(burstGeo.attributes.position.count * 3).fill(1), 3));
+const burstMesh = new THREE.InstancedMesh(
+  burstGeo,
+  new THREE.MeshBasicMaterial({
+    map: haloTex, color: 0xffffff, vertexColors: true, transparent: true,
+    opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,
+  }),
+  BURST_N
+);
+burstMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+burstMesh.frustumCulled = false;
+burstMesh.count = 0;
+burstMesh.visible = false;
+scene.add(burstMesh);
 
 const hitBursts = [];
+const sparkPool = [];
 function spawnHitBurst(pos, colorIdx) {
   const color = new THREE.Color(TARGET_COLORS[colorIdx % TARGET_COLORS.length]);
-  const flash = takeSprite(1.4);
-  flash.position.copy(pos);
-  flash.material.color.set(0xffffff);
-  // sparks: short-lived additive sprites flung outward with gravity
+  const flash = { x: pos.x, y: pos.y, z: pos.z };
+  // sparks: short-lived additive puffs flung outward with gravity
   const sparks = [];
   for (let i = 0; i < 9; i++) {
-    const s = takeSprite(0.16);
-    s.position.copy(pos);
-    s.material.color.copy(color);
+    const s = sparkPool.pop() || {};
     const a = Math.random() * Math.PI * 2, up = Math.random() * 0.9;
-    sparks.push({
-      s,
-      vx: Math.cos(a) * (2.5 + Math.random() * 3.5),
-      vy: up * 5 + 1.5,
-      vz: Math.sin(a) * (2.5 + Math.random() * 3.5),
-    });
+    s.x = pos.x; s.y = pos.y; s.z = pos.z;
+    s.vx = Math.cos(a) * (2.5 + Math.random() * 3.5);
+    s.vy = up * 5 + 1.5;
+    s.vz = Math.sin(a) * (2.5 + Math.random() * 3.5);
+    s.color = color; // shared reference: every spark is this target's colour
+    sparks.push(s);
   }
   hitBursts.push({ flash, sparks, t: 0, life: 0.45 });
 }
 
+const _bq = new THREE.Quaternion(), _bm = new THREE.Matrix4(),
+      _bs = new THREE.Vector3(), _bp = new THREE.Vector3(),
+      _bc = new THREE.Color();
 function updateHitBursts(dt) {
-  if (!hitBursts.length) return;
+  if (!hitBursts.length) {
+    if (burstMesh.count) { burstMesh.count = 0; burstMesh.visible = false; }
+    return;
+  }
+  _bq.copy(camera.quaternion); // billboards face the camera, like a sprite did
+  let n = 0;
   for (let i = hitBursts.length - 1; i >= 0; i--) {
     const b = hitBursts[i];
     b.t += dt;
     const u = b.t / b.life; // 0→1
     if (u >= 1) {
-      // done: return the pooled sprites instead of disposing them
-      restSprite(b.flash);
-      for (const k of b.sparks) restSprite(k.s);
+      // done: recycle the spark records instead of dropping them
+      for (const k of b.sparks) sparkPool.push(k);
       hitBursts.splice(i, 1);
       continue;
     }
     // flash: brief bright core, gone by 40% of life
-    b.flash.scale.setScalar(1.4 * (1 + u * 1.6));
-    b.flash.material.opacity = Math.max(0, 1 - u * 2.6);
+    if (n < BURST_N) {
+      _bm.compose(_bs.set(b.flash.x, b.flash.y, b.flash.z), _bq,
+                  _bp.setScalar(1.4 * (1 + u * 1.6)));
+      burstMesh.setMatrixAt(n, _bm);
+      burstMesh.setColorAt(n, _bc.setRGB(1, 1, 1).multiplyScalar(Math.max(0, 1 - u * 2.6)));
+      n++;
+    }
     // sparks: ballistic — integrate velocity, pull down with gravity
     for (const k of b.sparks) {
       k.vy -= 14 * dt;
-      k.s.position.x += k.vx * dt;
-      k.s.position.y += k.vy * dt;
-      k.s.position.z += k.vz * dt;
-      k.s.material.opacity = Math.max(0, 1 - u * 1.15);
-      k.s.scale.setScalar(0.16 * (1 - u * 0.7));
+      k.x += k.vx * dt;
+      k.y += k.vy * dt;
+      k.z += k.vz * dt;
+      if (n >= BURST_N) continue;
+      _bm.compose(_bs.set(k.x, k.y, k.z), _bq, _bp.setScalar(0.16 * (1 - u * 0.7)));
+      burstMesh.setMatrixAt(n, _bm);
+      burstMesh.setColorAt(n, _bc.copy(k.color).multiplyScalar(Math.max(0, 1 - u * 1.15)));
+      n++;
     }
   }
+  burstMesh.count = n;
+  burstMesh.visible = n > 0;
+  burstMesh.instanceMatrix.needsUpdate = true;
+  if (burstMesh.instanceColor) burstMesh.instanceColor.needsUpdate = true;
   invalidate(); // something is animating → must redraw this frame
 }
 
-/* --- bullet trail: a short additive streak, crosshair → impact ---
-   Hitscan has no projectile, so the trail IS the bullet's path: the head
+/* --- bullet trail: a short additive streak, gun-side → impact ---
+   Hitscan has no projectile, so the streak IS the bullet's path: the head
    races out at ~50 ms, the tail chases it off ~40 ms later, and the whole
-   streak is gone by ~110 ms — long enough to read, short enough to never
-   clutter a flick. Pooled (TRAIL_N), one stretched box each — boxy like the
-   gun, zero allocation per shot.
+   streak is gone by ~120 ms — long enough to read, short enough to never
+   clutter a flick.
 
-   The START point is ON the aim ray (TRAIL_START metres in front of the
-   eye), NOT the muzzle: the viewmodel sits right-of-centre, so a
-   muzzle→impact line cuts a diagonal across the crosshair and reads as a
-   bent bullet. Every point on the camera ray projects to the same screen
-   pixel, so anchoring on it makes the streak a straight line running out of
-   the crosshair. 0.8 m is past the muzzle, and the gun never enters the
-   gameplay raycast, so the two can't conflict. */
-const TRAIL_START = 0.8;
+   WHERE it starts matters twice over:
+   • it must sit on the aim ray, so the far end converges on whatever you
+     actually aimed at;
+   • but it must NOT be exactly on it — every point on a view ray projects
+     to the SAME screen pixel, so a purely on-axis streak renders as a dot
+     and nothing else (that is what "the trail is not working" looked like).
+     TRAIL_PULL drags the near end TRAIL_PULL of the way toward the muzzle,
+     which puts it ~8° below-right of the crosshair: clearly visible, reads
+     as leaving the gun, and no long diagonal from the corner of the screen.
+
+   All TRAIL_N streaks share ONE InstancedMesh — 1 draw call and 1 material
+   for the whole pool instead of up to 8 of each. Per-instance brightness
+   comes from instanceColor multiplied by a white vertex-colour attribute,
+   because three only forwards vColor to the fragment shader when USE_COLOR
+   is defined (verified in vendored r160: `color_vertex`/`color_fragment`). */
+const TRAIL_START = 1.0;  // metres in front of the eye where a streak starts
+   // (past the viewmodel's nose: at 0.8 m the gun's own geometry hid the
+   //  whole near half of the streak behind itself)
+const TRAIL_PULL = 0.85;  // 0 = exactly on the ray (invisible), 1 = at the muzzle
+const TRAIL_W = 0.034;    // world thickness of the streak
 const TRAIL_N = 8;
+const _tl0 = new THREE.Vector3(), _tl1 = new THREE.Vector3(),
+      _tl2 = new THREE.Vector3();
 const trailGeo = new THREE.BoxGeometry(1, 1, 1);
+{
+  const n = trailGeo.attributes.position.count;
+  trailGeo.setAttribute("color",
+    new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+}
+const trailMesh = new THREE.InstancedMesh(
+  trailGeo,
+  new THREE.MeshBasicMaterial({
+    color: 0xffffff, vertexColors: true, transparent: true, opacity: 1,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }),
+  TRAIL_N
+);
+trailMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+trailMesh.frustumCulled = false;
+trailMesh.count = 0;
+trailMesh.visible = false;
+scene.add(trailMesh);
+const _trailCol = new THREE.Color();
 const trails = [];
 for (let i = 0; i < TRAIL_N; i++) {
-  const m = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0,
-    blending: THREE.AdditiveBlending, depthWrite: false,
-  }));
-  m.visible = false;
-  scene.add(m);
-  trails.push({ m, a: new THREE.Vector3(), b: new THREE.Vector3(), t: 0, life: 0.11, on: false });
+  trails.push({
+    a: new THREE.Vector3(), b: new THREE.Vector3(), pos: new THREE.Vector3(),
+    len: 0, op: 0, t: 0, life: 0.13, on: false,
+  });
 }
 let trailIdx = 0;
 function spawnTrail(from, to) {
@@ -1338,37 +1393,45 @@ function spawnTrail(from, to) {
   tr.b.copy(to);
   tr.t = 0;
   tr.on = true;
-  tr.m.visible = true;
   invalidate(); // first frame of the streak must draw
 }
 const _tr0 = new THREE.Vector3(), _tr1 = new THREE.Vector3(),
-      _trd = new THREE.Vector3(), _trz = new THREE.Vector3(0, 0, 1);
+      _trd = new THREE.Vector3(), _trz = new THREE.Vector3(0, 0, 1),
+      _trq = new THREE.Quaternion(), _trm = new THREE.Matrix4(),
+      _trs = new THREE.Vector3();
 function updateTrails(dt) {
-  let anim = false;
+  let n = 0;
   for (const tr of trails) {
-    if (!tr.on) continue;
-    tr.t += dt;
-    if (tr.t >= tr.life) {
-      tr.on = false;
-      tr.m.visible = false;
-      continue;
+    if (tr.on) {
+      tr.t += dt;
+      if (tr.t >= tr.life) tr.on = false;
     }
-    const head = Math.min(1, tr.t / 0.05);            // muzzle → impact
+    if (!tr.on) { tr.op = 0; continue; }
+    const head = Math.min(1, tr.t / 0.05);                  // → impact
     const tail = Math.max(0, Math.min(1, (tr.t - 0.04) / 0.06)); // trailing off
     _tr0.lerpVectors(tr.a, tr.b, tail);
     _tr1.lerpVectors(tr.a, tr.b, head);
-    const len = _tr0.distanceTo(_tr1);
-    tr.m.position.lerpVectors(_tr0, _tr1, 0.5);
-    _trd.subVectors(_tr1, _tr0);
-    if (_trd.lengthSq() < 1e-10) _trd.set(0, 0, 1);
-    else _trd.normalize();
-    tr.m.quaternion.setFromUnitVectors(_trz, _trd);
+    const len = Math.max(_tr0.distanceTo(_tr1), 1e-4);
+    tr.pos.lerpVectors(_tr0, _tr1, 0.5);
+    _trd.subVectors(_tr1, _tr0).normalize();
+    _trq.setFromUnitVectors(_trz, _trd);
     const u = tr.t / tr.life;
-    tr.m.scale.set(0.024, 0.024, Math.max(len, 1e-4));
-    tr.m.material.opacity = u < 0.55 ? 1 : 1 - (u - 0.55) / 0.45;
-    anim = true;
+    tr.op = u < 0.55 ? 1 : 1 - (u - 0.55) / 0.45;
+    tr.len = len;
+    _trs.set(TRAIL_W, TRAIL_W, len);
+    _trm.compose(tr.pos, _trq, _trs);
+    trailMesh.setMatrixAt(n, _trm);
+    _trailCol.setScalar(tr.op);  // additive → brightness IS the opacity
+    trailMesh.setColorAt(n, _trailCol);
+    n++;
   }
-  if (anim) invalidate();
+  trailMesh.count = n;
+  trailMesh.visible = n > 0;
+  if (n) {
+    trailMesh.instanceMatrix.needsUpdate = true;
+    if (trailMesh.instanceColor) trailMesh.instanceColor.needsUpdate = true;
+    invalidate(); // streaks are animating → must redraw this frame
+  }
 }
 
 /* --- bullet holes: one InstancedMesh, 48 slots, round-robin ---
@@ -2254,8 +2317,8 @@ window.__aim = { camera, scene, targets, spawnTarget, renderer, pauseGame, resum
     step(ms) { updateTrails(ms / 1000); }, // test: advance streak anim manually
     get trailDebug() {
       return trails.map((t) => ({
-        on: t.on, vis: t.m.visible, op: t.m.material.opacity,
-        pos: t.m.position.toArray(), scale: t.m.scale.toArray(),
+        on: t.on, vis: trailMesh.visible && t.on, op: t.op,
+        pos: t.pos.toArray(), scale: [TRAIL_W, TRAIL_W, t.len],
         a: t.a.toArray(), b: t.b.toArray(),
       }));
     },
