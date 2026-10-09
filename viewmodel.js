@@ -216,41 +216,50 @@ export function createViewmodel(camera) {
 
   group.add(slidePivot);
 
-  /* ---- gloved hand wrapping the grip ---- */
+  /* ---- gloved hand wrapping the grip ----
+     Sized/placed against the grip box (0.062 wide, front face at z≈-0.01):
+     everything sits on the +x side (the hand's own side) and the fingers
+     wrap the FRONT edge. Before this pass the fingers and palm were wider
+     than the grip itself and centred on it, so from the camera — which sits
+     to the gun's right and sees its LEFT face — they read as a stack of
+     slabs lying on the flank instead of a hand holding the gun. */
   // palm behind the grip + heel pad under it
-  add(new THREE.BoxGeometry(0.075, 0.15, 0.09), gloveMat, 0.005, -0.185, 0.115, 0.28);
-  add(new THREE.BoxGeometry(0.07, 0.06, 0.06), gloveMat, 0.005, -0.250, 0.130, 0.34);
+  add(new THREE.BoxGeometry(0.058, 0.15, 0.085), gloveMat, 0.012, -0.185, 0.108, 0.28);
+  add(new THREE.BoxGeometry(0.056, 0.06, 0.058), gloveMat, 0.012, -0.250, 0.122, 0.34);
   // four fingers wrapping the front of the grip — each finger is TWO segments
-  // (proximal flat on the grip, distal curled around its front edge)
+  // (proximal flat on the grip face, distal curled just past its front edge)
   for (let i = 0; i < 4; i++) {
     add(
-      new THREE.BoxGeometry(0.075, 0.03, 0.05),
+      new THREE.BoxGeometry(0.03, 0.028, 0.052),
       gloveMat,
-      -0.005,
+      0.014,
       -0.115 - i * 0.042,
-      0.045 - i * 0.012,
+      0.030 - i * 0.011,
       0.28
     );
     add(
-      new THREE.BoxGeometry(0.07, 0.028, 0.045),
+      new THREE.BoxGeometry(0.028, 0.026, 0.046),
       gloveMat,
-      -0.005,
-      -0.124 - i * 0.042,
-      0.002 - i * 0.011,
-      0.62
+      0.014,
+      -0.126 - i * 0.042,
+      -0.016 - i * 0.011,
+      0.7
     );
   }
   // thumb: proximal up the side, tip angled onto the frame
-  add(new THREE.BoxGeometry(0.03, 0.10, 0.05), gloveMat, 0.045, -0.13, 0.07, 0.2, 0, -0.35);
-  add(new THREE.BoxGeometry(0.028, 0.06, 0.045), gloveMat, 0.052, -0.075, 0.042, 0.25, 0, -0.55);
+  add(new THREE.BoxGeometry(0.03, 0.10, 0.05), gloveMat, 0.045, -0.13, 0.062, 0.2, 0, -0.35);
+  add(new THREE.BoxGeometry(0.028, 0.06, 0.045), gloveMat, 0.052, -0.075, 0.036, 0.25, 0, -0.55);
   // trigger finger: straight along the frame, then bent down into the guard
-  add(new THREE.BoxGeometry(0.03, 0.032, 0.16), gloveMat, 0.03, -0.065, -0.05, 0.1);
-  add(new THREE.BoxGeometry(0.028, 0.03, 0.08), gloveMat, 0.028, -0.098, -0.105, 1.0);
-  // wrist cuff with neon trim
-  add(new THREE.BoxGeometry(0.10, 0.11, 0.10), gloveMat, 0.01, -0.30, 0.19, 0.34);
-  add(new THREE.BoxGeometry(0.105, 0.014, 0.105), accentMat, 0.01, -0.345, 0.215, 0.34);
-  // forearm running off the bottom-right of the frame
-  add(new THREE.BoxGeometry(0.115, 0.115, 0.42), gloveMat, 0.03, -0.44, 0.42, 0.5, 0, 0.12);
+  add(new THREE.BoxGeometry(0.03, 0.032, 0.16), gloveMat, 0.026, -0.065, -0.05, 0.1);
+  add(new THREE.BoxGeometry(0.028, 0.03, 0.08), gloveMat, 0.024, -0.098, -0.105, 1.0);
+  /* wrist cuff with neon trim, then the forearm as TWO tapered segments that
+     run down-and-back out of the bottom of the frame. One 0.42-long slab
+     read as a plank lying across the screen; splitting it and dropping the
+     end out of frame makes it read as an arm instead. */
+  add(new THREE.BoxGeometry(0.095, 0.105, 0.10), gloveMat, 0.012, -0.30, 0.19, 0.42);
+  add(new THREE.BoxGeometry(0.10, 0.014, 0.10), accentMat, 0.012, -0.345, 0.215, 0.42);
+  add(new THREE.BoxGeometry(0.105, 0.105, 0.26), gloveMat, 0.012, -0.350, 0.332, 0.42);
+  add(new THREE.BoxGeometry(0.14, 0.14, 0.30), gloveMat, 0.016, -0.474, 0.558, 0.62, 0, 0.1);
 
   /* ---- merge: one draw call per material per pivot ----
      Every recorded part sharing a material collapses into a single mesh with
@@ -317,9 +326,13 @@ export function createViewmodel(camera) {
   flash.scale.setScalar(0.001); // invisible until fired
   slidePivot.add(flash);
 
-  /* base pose: bottom-right, angled slightly inward like a held weapon */
-  group.position.set(0.30, -0.28, -0.60);
-  group.rotation.set(0.02, -0.10, 0.0);
+  /* base pose: bottom-right corner, barrel converged slightly LEFT so it
+     lines up with where the shots actually go. A negative yaw here pointed
+     the muzzle off to the right (the gun "aimed away" from the crosshair,
+     which is what made the pose read as wrong) — the gun sits right of the
+     eye, so the barrel has to cant inward to converge on the aim line. */
+  group.position.set(0.30, -0.26, -0.58);
+  group.rotation.set(0.03, 0.06, 0.0);
   group.visible = false; // the menu is the startup state: no gun until a round
 
   camera.add(group);
@@ -336,7 +349,7 @@ export function createViewmodel(camera) {
   // head bob phase (walk tasks)
   let bobPhase = 0;
 
-  const REST = { px: 0.30, py: -0.28, pz: -0.60, rx: 0.02, ry: -0.10 };
+  const REST = { px: 0.30, py: -0.26, pz: -0.58, rx: 0.03, ry: 0.06 };
 
   /* ---- spent casings: ONE InstancedMesh (1 draw call), pooled ----
      World-space (they fall to the floor, so they can't live under the
