@@ -3,15 +3,37 @@
 A browser aim trainer modeled on Aim Lab, rendered with three.js (vendored
 locally, so it works fully offline).
 
-## Run it
+## ▶ Play it
+
+**https://anonamerjaxon-dev.github.io/aim-range/** — hosted on GitHub Pages,
+no install, no build step.
+
+To run it locally (or offline):
 
 ```sh
-cd aim-lab
+cd aim-range
 python3 -m http.server 8931 --bind 127.0.0.1
 # then open http://127.0.0.1:8931/index.html
 ```
 
 A server is required (ES modules don't load over `file://`).
+
+## How to use it
+
+1. Open the link → the menu shows **12 task cards**, each with a one-line
+   description and your personal best.
+2. **Click a card** → a 3-2-1 countdown → 60 seconds on the clock. Click the
+   orbs. The crosshair is yours: mouse moves it, LMB shoots.
+3. Watch **STREAK** (every 5 in a row adds +10%, capped at 2×), **ACCURACY**
+   and **TARGETS** in the top corners; the bottom-left shows the current task.
+4. **Esc** pauses (and releases the mouse). From pause: resume, restart, or
+   quit to menu. On the results screen press **R** to go again.
+5. **STATS** (menu, bottom right) shows per-task history, trend, grade vs your
+   own best, and a top-3 leaderboard. Everything persists in `localStorage`.
+6. Tweak at the bottom of the menu: sensitivity/FOV, crosshair shape/size/
+   colour, volume, resolution scale (the GPU dial), **theme** (Neon /
+   Synthwave / Ember / Matrix — repaints the room, the HUD *and* the orbs),
+   ball style, and the Feel sliders (inertia / camera recoil / gun kick).
 
 ## Tasks (12)
 
@@ -95,7 +117,11 @@ Signal chain: `voices → master gain → compressor → output`, with a paralle
   the grade-A colour and the crosshair all derive from `--accent` (via
   `color-mix`), so no chrome can drift back to neon cyan. The crosshair
   follows the theme until you pick a colour yourself — that choice then pins
-  it, and survives theme switches.
+  it, and survives theme switches. **Targets too**: `orbPalette()` derives
+  five orb shades from the accent (base, brighter, tinted near-white, deeper,
+  +0.06 hue step — never a wrap-around, so Ember stays warm and Synth stays
+  pink), and a theme switch rebuilds the palette, drops the baked candy
+  textures and restyles every orb currently on screen.
 - **Feel**: three 0–300% sliders — movement inertia (velocity smoothing tau),
   camera recoil (subtle shake impulse), gun kick (viewmodel spring strength)
 
@@ -107,12 +133,18 @@ screen-space hitmarker, a floating `+score` pop, and a pooled additive burst
 (white flash + 9 gravity sparks) at the impact point. On top of that, every
 shot leaves physical evidence:
 
-- **Bullet trail** — a short additive streak, muzzle → impact, ~110 ms. It IS
-  the projectile (the shot is hitscan), pooled 8 deep, one stretched box each.
-- **Bullet holes** — one `InstancedMesh`, 48 slots, round-robin. Walls and
-  floor keep the dent (dark pit + light chip rim so it reads on dark
-  surfaces); orbs absorb the shot and never get one. Static once placed, so a
-  scarred room still costs nothing extra to draw.
+- **Bullet trail** — a short additive streak, crosshair → impact, ~110 ms. It
+  IS the projectile (the shot is hitscan), pooled 8 deep, one stretched box
+  each. The start point sits **on the aim ray** (0.8 m in front of the eye),
+  not at the muzzle: every point on that ray projects to the same screen
+  pixel, so the streak always reads as one straight line leaving the
+  crosshair instead of a diagonal "bent bullet" from the offset gun.
+- **Bullet holes** — one `InstancedMesh`, 48 slots, oldest-first recycling.
+  Walls and floor keep the dent (dark pit + light chip rim so it reads on
+  dark surfaces); orbs absorb the shot and never get one. A dent is permanent
+  only for **9 s**, then shrinks away over 0.55 s (`HOLE_TTL` / `HOLE_FADE`)
+  so a long spray can't pockmark the room forever — and it only invalidates
+  the render loop while something is actually fading.
 - Everything animated invalidates the render loop **only while alive**, so an
   idle scene stays at 0 renders/s.
 
@@ -144,6 +176,7 @@ node smoke.mjs          # menu cards, HUD, WebGL, console errors
 node probes/e2e.mjs     # 16 assertions: settings, shoot, pause, quit, stats, motion
 node probes/juice.mjs   # 8 assertions: trail / holes / burst shape / pop pooling
 node probes/theming.mjs # per-theme computed styles + pinned crosshair colour
+node probes/fixes.mjs   # trail anchored on the aim ray / hole TTL / orbs follow theme
 node probes/perf.mjs    # fps, ms/render, draw calls, idle renders/s
 ```
 
