@@ -213,4 +213,5 @@ MIT — see [LICENSE](./LICENSE).
 
 `three.module.js` bundles three.js r160, which is MIT licensed,
 Copyright 2010-2023 Three.js Authors (https://github.com/mrdoob/three.js);
-its license header is retained in the bundled file.
+its license header is retained in the bundled file. See
+[THIRD-PARTY.md](./THIRD-PARTY.md).
