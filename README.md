@@ -206,3 +206,11 @@ node probes/perf.mjs    # fps, ms/render, draw calls, idle renders/s
 - `smoke.mjs` — headless Playwright check (menu cards, HUD, WebGL, console errors)
 - `probes/` — the regression suite (e2e, juice, theming, perf); all assume
   `python3 -m http.server 8931` is running
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
+
+`three.module.js` bundles three.js r160, which is MIT licensed,
+Copyright 2010-2023 Three.js Authors (https://github.com/mrdoob/three.js);
+its license header is retained in the bundled file.
